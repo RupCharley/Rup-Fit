@@ -1498,7 +1498,12 @@
     <div class="log-row">
       <div>
         <label>Date</label>
-        <input type="date" id="log-date" onchange="loadLogDate(this.value)">
+        <div id="log-date-display" data-value="" onclick="openLogPicker()"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;
+                 padding:9px 12px;font-size:14px;color:var(--muted);cursor:pointer;
+                 touch-action:manipulation;user-select:none;min-width:130px">
+          Select date
+        </div>
       </div>
       <div>
         <label>Weight (kg)</label>
@@ -1555,6 +1560,7 @@
   <div class="card">
     <div class="card-title">Log History</div>
     <div id="log-history"><p style="color:var(--muted);font-size:13px">No measurements logged yet.</p></div>
+    <button onclick="importFromCSV()" style="width:100%;margin-top:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);font-family:'Courier New',Courier,monospace;font-size:12px;padding:11px;cursor:pointer;touch-action:manipulation">📤 Import Data from CSV</button>
   </div>
 </div>
 
@@ -1762,7 +1768,7 @@ function exportToCSV() {
   const measRows = [['Date','Weight (kg)','Waist (cm)','Blood Pressure','Body Fat (%)']];
   log.forEach(l => {
     const h = healthMap[l.date] || {};
-    measRows.push([l.date, l.weight.toFixed(1), l.waist||'', h.bp||'', h.bf!=null?h.bf.toFixed(1):'']);
+    if (l.weight != null || l.waist) measRows.push([l.date, l.weight!=null?l.weight.toFixed(1):'', l.waist||'', h.bp||'', h.bf!=null?h.bf.toFixed(1):'']);
   });
 
   // Nutrition sheet
@@ -1773,14 +1779,146 @@ function exportToCSV() {
   const toCSV = rows => rows.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
   const csv = 'MEASUREMENTS\n' + toCSV(measRows) + '\n\nNUTRITION LOG\n' + toCSV(nutRows);
 
-  const blob = new Blob([csv], {type:'text/csv'});
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
+  const a = document.createElement('a');
   a.href = url;
   a.download = 'rupert_fitness_log.csv';
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+function importFromCSV() {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.onchange = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var text = ev.target.result;
+        function parseCSVLine(line) {
+          var result = [], cur = '', inQ = false;
+          for (var i = 0; i < line.length; i++) {
+            var ch = line[i];
+            if (ch === '"') {
+              if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ;
+            } else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+            else { cur += ch; }
+          }
+          result.push(cur.trim()); return result;
+        }
+        var lines = text.split(/\r?\n/);
+        var section = null;
+        var measData = [], healthData = [], foodData = [];
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li].trim();
+          if (!line) { section = null; continue; }
+          if (line === 'MEASUREMENTS')  { section = 'meas'; continue; }
+          if (line === 'NUTRITION LOG') { section = 'nut';  continue; }
+          var cols = parseCSVLine(line);
+          if (section === 'meas') {
+            if (cols[0] === 'Date') continue;
+            var date = cols[0]; if (!date) continue;
+            var weight = parseFloat(cols[1]);
+            var waist  = parseFloat(cols[2]) || null;
+            var bp     = cols[3] || null;
+            var bf     = parseFloat(cols[4]);
+            if (!isNaN(weight) || waist != null) measData.push({ date: date, weight: isNaN(weight) ? null : weight, waist: waist });
+            if (bp || !isNaN(bf)) healthData.push({ date: date, bp: bp, bf: isNaN(bf) ? null : bf });
+          }
+          if (section === 'nut') {
+            if (cols[0] === 'Date') continue;
+            var ndate = cols[0], name = cols[1];
+            if (!ndate || !name) continue;
+            foodData.push({ id: Date.now() + Math.random(), date: ndate, name: name,
+              kcal: parseFloat(cols[2])||0, prot: parseFloat(cols[3])||0,
+              carb: parseFloat(cols[4])||0, fat:  parseFloat(cols[5])||0 });
+          }
+        }
+        var log = getData(STORE_LOG);
+        measData.forEach(function(r) {
+          var i = log.findIndex(function(l) { return l.date === r.date; });
+          if (i >= 0) { if (r.weight != null) log[i].weight = r.weight; if (r.waist != null) log[i].waist = r.waist; }
+          else if (r.weight != null) log.push(r);
+        });
+        log.sort(function(a,b) { return a.date.localeCompare(b.date); });
+        setData(STORE_LOG, log);
+        var health = getData(STORE_HEALTH);
+        healthData.forEach(function(r) {
+          var i = health.findIndex(function(h) { return h.date === r.date; });
+          if (i >= 0) { if (r.bp) health[i].bp = r.bp; if (r.bf != null) health[i].bf = r.bf; }
+          else health.push(r);
+        });
+        health.sort(function(a,b) { return a.date.localeCompare(b.date); });
+        setData(STORE_HEALTH, health);
+        var food = getData(STORE_FOOD);
+        foodData.forEach(function(r) {
+          if (!food.some(function(f) { return f.date === r.date && f.name === r.name && f.kcal === r.kcal; }))
+            food.push(r);
+        });
+        setData(STORE_FOOD, food);
+        alert('Import complete:\n' + measData.length + ' measurement rows\n' +
+              healthData.length + ' health records\n' + foodData.length + ' food entries');
+        renderProgress(); renderHealthMetrics(); renderNutrition();
+      } catch(err) { alert('Import failed: ' + err.message); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+function startPlankTimer(btnId, displayId, seconds) {
+  var btn  = document.getElementById(btnId);
+  var disp = document.getElementById(displayId);
+  if (!btn || !disp) return;
+
+  // If already running, reset
+  if (btn._timerRunning) {
+    clearInterval(btn._timerInterval);
+    btn._timerRunning = false;
+    var orig = btn._timerSeconds;
+    disp.textContent = orig + 's';
+    disp.style.color = 'var(--accent)';
+    btn.textContent  = '▶ Start';
+    btn.style.background = 'var(--accent)';
+    return;
+  }
+
+  var remaining = seconds;
+  btn._timerRunning = true;
+  btn._timerSeconds = seconds;
+  btn.textContent = '⏸ Reset';
+  btn.style.background = 'var(--danger)';
+
+  disp.style.color = 'var(--success)';
+
+  btn._timerInterval = setInterval(function() {
+    remaining--;
+    disp.textContent = remaining + 's';
+    if (remaining <= 5) disp.style.color = 'var(--danger)';
+    if (remaining <= 0) {
+      clearInterval(btn._timerInterval);
+      btn._timerRunning = false;
+      disp.textContent = 'Done!';
+      disp.style.color = 'var(--success)';
+      btn.textContent  = '▶ Again';
+      btn.style.background = 'var(--accent)';
+      // Reset for next use
+      setTimeout(function() {
+        disp.textContent = seconds + 's';
+        disp.style.color = 'var(--accent)';
+        btn.textContent  = '▶ Start';
+      }, 2000);
+    }
+  }, 1000);
+}
+
+
 
 function logHealthMetrics() {
   const bp = document.getElementById('log-bp').value.trim();
@@ -1858,6 +1996,7 @@ function swapRestDay() {
     delete swaps[today];
     localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
     renderToday();
+    renderWeekView();
     return;
   }
   // Find next session day
@@ -1871,6 +2010,7 @@ function swapRestDay() {
       swaps[today] = { session: sessions[day], date: d.toISOString().split('T')[0] };
       localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
       renderToday();
+      renderWeekView();
       return;
     }
   }
@@ -1897,6 +2037,7 @@ function swapRestDayForDate(dateStr) {
     }
   }
   renderWeekView();
+  renderToday();
   closeModal();
 }
 
@@ -1917,10 +2058,10 @@ function markSessionMissed() {
   const ds = getDateStr();
   const missed = getData(STORE_MISSED);
   if (!missed.includes(ds)) { missed.push(ds); setData(STORE_MISSED, missed); }
-  // Remove from done if accidentally marked
-  setData(STORE_DONE, getData(STORE_DONE).filter(d=>d!==ds));
+  setData(STORE_DONE,      getData(STORE_DONE).filter(d=>d!==ds));
+  setData(STORE_AWAY_DONE, getData(STORE_AWAY_DONE).filter(d=>d!==ds));
   renderToday();
-  if (schedView === 'week') renderWeekView();
+  if (schedView === 'week') renderWeekView(); else if (schedView === 'month') renderMonthView();
 }
 
 function markSessionDone() {
@@ -1930,7 +2071,7 @@ function markSessionDone() {
   setData(STORE_MISSED, getData(STORE_MISSED).filter(d=>d!==ds));
   setData(STORE_AWAY_DONE, getData(STORE_AWAY_DONE).filter(d=>d!==ds));
   renderToday();
-  if (schedView === 'week') renderWeekView();
+  if (schedView === 'week') renderWeekView(); else if (schedView === 'month') renderMonthView();
 }
 
 function markAwayDone() {
@@ -1975,7 +2116,8 @@ function markMissedForDate(dateStr) {
 }
 
 function undoMissedForDate(dateStr) {
-  setData(STORE_MISSED, getData(STORE_MISSED).filter(d => d !== dateStr));
+  setData(STORE_MISSED,    getData(STORE_MISSED).filter(d => d !== dateStr));
+  setData(STORE_DONE,      getData(STORE_DONE).filter(d => d !== dateStr));
   setData(STORE_AWAY_DONE, getData(STORE_AWAY_DONE).filter(d => d !== dateStr));
   closeModal();
   if (schedView === 'week') renderWeekView(); else renderMonthView();
@@ -1985,7 +2127,9 @@ function undoMissedForDate(dateStr) {
 
 function undoMissed() {
   const ds = getDateStr();
-  setData(STORE_MISSED, getData(STORE_MISSED).filter(d=>d!==ds));
+  setData(STORE_MISSED,    getData(STORE_MISSED).filter(d=>d!==ds));
+  setData(STORE_DONE,      getData(STORE_DONE).filter(d=>d!==ds));
+  setData(STORE_AWAY_DONE, getData(STORE_AWAY_DONE).filter(d=>d!==ds));
   renderToday();
   if (schedView === 'week') renderWeekView();
 }
@@ -2020,11 +2164,14 @@ function renderToday() {
   // Check swaps
   const todayStr = new Date().toISOString().split('T')[0];
   const swaps = getSwaps();
-  const day = swaps[todayStr] ? swaps[todayStr].session : (sessionKey || dayName);
+  // If today's session was moved away to a rest day, treat today as rest
+  const isSourceOfSwap = Object.values(swaps).some(s => s && s.date === todayStr);
+  const swappedInSession = swaps[todayStr] ? swaps[todayStr].session : null;
+  const day = swappedInSession || sessionKey || dayName;
   const container = document.getElementById('session-container');
   const ds = getDateStr();
 
-  if (!sessionKey && !swaps[todayStr]) {
+  if ((!sessionKey && !swappedInSession) || isSourceOfSwap) {
     const r = REST_MESSAGES[day] || { icon:'😴', title:'Rest Day', msg:'Enjoy your rest.' };
     container.innerHTML = `
       <div class="card">
@@ -2034,6 +2181,18 @@ function renderToday() {
           <p style="margin-top:8px">${r.msg}</p>
         </div>
       </div>
+      ${dayName === 'Wed' ? `
+      <div style="background:rgba(76,127,201,0.08);border:1px solid rgba(76,127,201,0.3);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">💃</span>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--accent)">Jive Dancing tonight</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Rest day from gym — Jive still on this evening</div>
+        </div>
+      </div>` : ''}
+      <div style="background:rgba(76,127,201,0.06);border:1px solid rgba(76,127,201,0.2);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div style="font-size:13px;color:var(--muted)">Rest day — want to train today instead?</div>
+        <button onclick="swapRestDay()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:8px 12px;font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">Swap</button>
+      </div>
       <div class="tip-box">
         <p><strong>Remember:</strong> Creatine 3g today regardless. Hydrate well. Sauna session recommended for recovery.</p>
       </div>`;
@@ -2042,7 +2201,8 @@ function renderToday() {
 
   const missed = isMissed(ds);
   const done = isDone(ds);
-  const s = sessionKey === 'A' ? SESSION_A : sessionKey === 'C' ? SESSION_C : SESSION_B;
+  const effectiveKey = swappedInSession || sessionKey;
+  const s = effectiveKey === 'A' ? SESSION_A : effectiveKey === 'C' ? SESSION_C : SESSION_B;
 
   // Missed state — show banner instead of session
   if (missed) {
@@ -2065,6 +2225,14 @@ function renderToday() {
           <button class="btn" style="flex:1;background:var(--success)" onclick="markSessionDone()">✓ Actually did it</button>
         </div>
       </div>
+      ${dayName === 'Wed' ? `
+      <div style="background:rgba(76,127,201,0.08);border:1px solid rgba(76,127,201,0.3);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">💃</span>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--accent)">Jive Dancing tonight</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Jive is still on this evening</div>
+        </div>
+      </div>` : ''}
       <div class="tip-box">
         <p><strong>Remember:</strong> Creatine 3g today regardless. Hydrate well.</p>
       </div>`;
@@ -2086,7 +2254,7 @@ function renderToday() {
       <button onclick="swapRestDay()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:8px 12px;font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">Swap</button>
     </div>` : '';
 
-  const isWednesday = day === 'Wed';
+  const isWednesday = dayName === 'Wed';
   const wednesdayBanner = isWednesday ? `
     <div style="background:rgba(76,127,201,0.08);border:1px solid rgba(76,127,201,0.3);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
       <span style="font-size:20px">💃</span>
@@ -2152,6 +2320,12 @@ function renderToday() {
       </div>
       <div class="exercise-expand" id="expand-${i}">
         <p class="exercise-tip">${ex.tip}</p>
+        ${(typeof ex.reps === 'string' && ex.reps.includes('sec')) ? (() => {
+          const tsecs = parseInt(ex.reps);
+          const tid   = 'today-timer-' + ex.id;
+          const tbtn  = 'today-tbtn-'  + ex.id;
+          return `<div style="display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div id="${tid}" style="font-family:'Courier New',Courier,monospace;font-size:28px;font-weight:700;color:var(--accent);min-width:60px;text-align:center">${tsecs}s</div><button id="${tbtn}" onclick="startPlankTimer('${tbtn}','${tid}',${tsecs})" style="flex:1;background:var(--accent);color:white;border:none;border-radius:8px;padding:10px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">▶ Start</button></div>`;
+        })() : ''}
         ${weightControl}
       </div>
     </div>`;
@@ -2160,7 +2334,7 @@ function renderToday() {
   container.innerHTML = `
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div class="session-badge">${day.toUpperCase()} · ${sessionKey === 'A' ? 'SESSION A' : sessionKey === 'C' ? 'SESSION C' : 'SESSION B'}</div>
+        <div class="session-badge">${effectiveKey === 'A' ? 'SESSION A' : effectiveKey === 'C' ? 'SESSION C' : 'SESSION B'}${isWednesday ? ' + JIVE 💃' : ''}</div>
         <button id="away-btn" onclick="toggleAwaySession()" style="background:transparent;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'Courier New',Courier,monospace;font-size:10px;padding:5px 10px;cursor:pointer;touch-action:manipulation;letter-spacing:0.5px">No Gym</button>
       </div>
       <div class="card-title">${s.name}</div>
@@ -2408,32 +2582,40 @@ function renderNutrition() {
 
 // ── PROGRESS ─────────────────────────────────────────────────────────
 function logMeasurement() {
-  const date   = document.getElementById('log-date').value;
+  const date   = getLogPickerValue();
   const weight = parseFloat(document.getElementById('log-weight').value);
   const waist  = parseFloat(document.getElementById('log-waist').value) || null;
   const bp     = document.getElementById('log-bp').value.trim() || null;
   const bf     = parseFloat(document.getElementById('log-bf').value) || null;
-  if (!date || isNaN(weight)) return;
+  // Require at least a date and one value
+  const hasWeight = !isNaN(weight);
+  const hasAny = hasWeight || waist != null || bp || bf != null;
+  if (!date || !hasAny) {
+    alert('Enter a date and at least one measurement.');
+    return;
+  }
 
-  // Save weight + waist
-  const log = getData(STORE_LOG).filter(l => l.date !== date);
-  log.push({ date, weight, waist });
-  log.sort((a,b) => a.date.localeCompare(b.date));
-  setData(STORE_LOG, log);
+  // Save weight + waist — only update log if weight or waist provided
+  if (hasWeight || waist != null) {
+    const log = getData(STORE_LOG).filter(l => l.date !== date);
+    // Merge with existing entry so partial saves don't wipe previous values
+    const existing = getData(STORE_LOG).find(l => l.date === date) || {};
+    log.push({ date, weight: hasWeight ? weight : existing.weight, waist: waist != null ? waist : (existing.waist || null) });
+    log.sort((a,b) => a.date.localeCompare(b.date));
+    setData(STORE_LOG, log);
+  }
 
-  // Save BP + BF alongside
+  // Save health record — merge with existing so partial saves don't wipe previous values
   if (bp || bf != null) {
     const health = getData(STORE_HEALTH).filter(r => r.date !== date);
-    health.push({ date, bp, bf });
+    const exH = getData(STORE_HEALTH).find(h => h.date === date) || {};
+    health.push({ date, bp: bp || exH.bp || null, bf: bf != null ? bf : (exH.bf != null ? exH.bf : null) });
     health.sort((a,b) => a.date.localeCompare(b.date));
     setData(STORE_HEALTH, health);
   }
 
-  // Clear fields
-  document.getElementById('log-weight').value = '';
-  document.getElementById('log-waist').value  = '';
-  document.getElementById('log-bp').value     = '';
-  document.getElementById('log-bf').value     = '';
+  // Reload fields to confirm saved values (don't clear — user may want to adjust)
+  loadLogDate(date);
 
   renderProgress();
   renderHealthMetrics();
@@ -2455,16 +2637,17 @@ function loadLogDate(date) {
 function renderProgress() {
   const log = getData(STORE_LOG);
   const latest = log.length ? log[log.length-1] : null;
-  const cw = latest ? latest.weight : START_WEIGHT;
-  const lost = (START_WEIGHT - cw).toFixed(1);
-  const toGo = (cw - TARGET_WEIGHT).toFixed(1);
+  const latestW = getData(STORE_LOG).filter(l => l.weight != null).slice(-1)[0] || null;
+  const cw = latestW ? latestW.weight : null;
+  const lost = cw != null ? (START_WEIGHT - cw).toFixed(1) : null;
+  const toGo = cw != null ? (cw - TARGET_WEIGHT).toFixed(1) : null;
   // Weight row
-  document.getElementById('stat-weight').textContent = latest ? cw.toFixed(1) : '—';
+  document.getElementById('stat-weight').textContent = cw != null ? cw.toFixed(1) : '—';
   const lostNum = parseFloat(lost);
   const lostEl = document.getElementById('stat-lost');
-  lostEl.textContent = latest ? (lostNum >= 0 ? '-'+Math.abs(lostNum).toFixed(1) : '+'+Math.abs(lostNum).toFixed(1)) : '—';
+  lostEl.textContent = (latestW && lost != null) ? (lostNum >= 0 ? '-'+Math.abs(lostNum).toFixed(1) : '+'+Math.abs(lostNum).toFixed(1)) : '—';
   lostEl.style.color = latest ? (lostNum >= 0 ? 'var(--success)' : 'var(--danger)') : 'var(--muted)';
-  document.getElementById('stat-to-go').textContent = latest ? Math.max(0,parseFloat(toGo)).toFixed(1) : '—';
+  document.getElementById('stat-to-go').textContent = (latestW && toGo != null) ? Math.max(0,parseFloat(toGo)).toFixed(1) : '—';
 
   // Waist row — pull baseline from settings
   const setup = getSetup();
@@ -2537,7 +2720,7 @@ function renderProgress() {
     }
     return '<tr style="border-bottom:1px solid rgba(42,42,58,0.5)">'
       + '<td style="padding:7px 4px;color:var(--muted)">' + ds + '</td>'
-      + '<td style="padding:7px 4px;text-align:right;color:' + wCol  + '">' + l.weight.toFixed(1) + '</td>'
+      + '<td style="padding:7px 4px;text-align:right;color:' + wCol  + '">' + (l.weight != null ? l.weight.toFixed(1) : '—') + '</td>'
       + '<td style="padding:7px 4px;text-align:right;color:' + waCol + '">' + (l.waist ? l.waist + 'cm' : '—') + '</td>'
       + '<td style="padding:7px 4px;text-align:right;color:' + bpCol + '">' + (h.bp || '—') + '</td>'
       + '<td style="padding:7px 4px;text-align:right;color:' + bfCol + '">' + (h.bf != null ? h.bf.toFixed(1) + '%' : '—') + '</td>'
@@ -2647,7 +2830,7 @@ function drawMiniChart(canvasId, points, color, targetVal, startVal, unit, gridV
     const last = points[points.length-1];
     ctx.fillStyle = color;
     ctx.font = 'bold 10px monospace';
-    ctx.fillText(last.val.toFixed(1)+unit, xS(last.day)+6, yS(last.val)+4);
+    if (last.val != null) ctx.fillText(last.val.toFixed(1)+unit, xS(last.day)+6, yS(last.val)+4);
   }
 }
 
@@ -2810,6 +2993,7 @@ function renderPhase(week) {
   if (!bar) return;
   let wCount = 0;
   let html = '';
+  let currentPhase = phases[phases.length - 1]; // default to last phase
   phases.forEach(p=>{
     const start = wCount;
     const end = wCount + p.weeks;
@@ -2938,6 +3122,7 @@ function renderWeekView() {
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;justify-content:center">
         <div class="day-badge ${isToday ? 'badge-today' : info.badge}">${info.label}</div>
         ${statusBadge}
+        ${dayNames[i] === 'Wed' ? '<span style="font-size:14px;line-height:1;margin-top:2px">💃</span>' : ''}
       </div>
     </div>`;
   }
@@ -2971,7 +3156,8 @@ function renderMissedSummary() {
   const missedList = missedDates.map(ds => {
     const d = new Date(ds); d.setHours(12);
     const dow = DOW_NAMES[d.getDay()];
-    const sType = getSessions()[dow];
+    const swapsM = getSwaps();
+    const sType = (swapsM[ds] ? swapsM[ds].session : null) || getSessions()[dow] || '?';
     return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
       <span>${ds} <span style="font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted)">${dow}</span></span>
       <span style="font-family:'Courier New',Courier,monospace;font-size:10px;padding:2px 8px;background:rgba(201,76,76,0.15);color:var(--danger);border-radius:8px">Session ${sType} missed</span>
@@ -3019,6 +3205,10 @@ function dayRowClick(dateStr, type) {
       const baseline = ex.suggested !== null ? getBaseline(ex.id, ex.suggested) : null;
       const weightStr = baseline !== null ? `${baseline}kg` : 'Bodyweight';
       const isSug = baseline === ex.suggested;
+      const isTimedEx = typeof ex.reps === 'string' && ex.reps.includes('sec');
+      const timerSecs = isTimedEx ? parseInt(ex.reps) : 0;
+      const timerId   = 'timer-' + ex.id;
+      const timerBtn  = 'tbtn-'  + ex.id;
       return `
       <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -3029,6 +3219,11 @@ function dayRowClick(dateStr, type) {
           </div>
         </div>
         <div style="font-size:12px;color:var(--muted);line-height:1.6">${ex.tip}</div>
+        ${isTimedEx ? `
+        <div style="display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+          <div id="${timerId}" style="font-family:'Courier New',Courier,monospace;font-size:28px;font-weight:700;color:var(--accent);min-width:60px;text-align:center">${timerSecs}s</div>
+          <button id="${timerBtn}" onclick="startPlankTimer('${timerBtn}','${timerId}',${timerSecs})" style="flex:1;background:var(--accent);color:white;border:none;border-radius:8px;padding:10px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">▶ Start</button>
+        </div>` : ''}
       </div>`}).join('');
 
     const jiveBanner = isWed ? `
@@ -3097,7 +3292,16 @@ function dayRowClick(dateStr, type) {
     const swapMsg = originalRestDate
       ? '<div style="font-family:\'Courier New\',Courier,monospace;font-size:11px;color:var(--muted);margin-top:8px;text-align:center">Session moved to another day</div>'
       : '';
+    const jiveBannerModal = isWed ? `
+      <div style="background:rgba(76,127,201,0.08);border:1px solid rgba(76,127,201,0.3);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">💃</span>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--accent)">Jive Dancing tonight</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Rest day from gym — Jive still on this evening</div>
+        </div>
+      </div>` : '';
     content = `
+      ${jiveBannerModal}
       <div style="text-align:center;padding:20px 0">
         <div style="font-size:48px;margin-bottom:12px">${r.icon}</div>
         <div style="font-family:Georgia,'Times New Roman',serif;font-size:22px;color:var(--gold);margin-bottom:10px">${r.title}</div>
@@ -3161,10 +3365,11 @@ function renderMonthView() {
     if (isPast && !isToday && !wasMissed && !wasDone) cls += ' past';
 
     const tick = wasAwayDone ? '<div style="font-size:16px;line-height:1;margin-top:1px">🔵</div>' : wasDone ? '<div style="font-size:16px;line-height:1;margin-top:1px">✅</div>' : '';
+    const isJiveDay = info.type === 'B' && DOW_NAMES[new Date(dateStr2 + 'T12:00:00').getDay()] === 'Wed';
     const lbl = isWedding
       ? '<div style="font-size:8px">💍</div>'
-      : wasDone ? tick
-      : (inProg && info.type !== 'rest' ? `<div class="month-cell-label">${info.label}</div>` : '');
+      : wasDone ? tick + (isJiveDay ? '<div style="font-size:8px;margin-top:1px">💃</div>' : '')
+      : (inProg && info.type !== 'rest' ? `<div class="month-cell-label">${info.label}</div>` + (isJiveDay ? '<div style="font-size:8px">💃</div>' : '') : '');
 
     html += `<div class="${cls}">
       <div class="month-cell-num">${d}</div>
@@ -3226,7 +3431,7 @@ function openSettings() {
   const curEl = document.getElementById('settings-current-data');
   if (curEl) {
     curEl.innerHTML = [
-      latestLog ? `<div><span style="color:var(--muted)">Weight:</span> <strong style="color:var(--text)">${latestLog.weight.toFixed(1)} kg</strong> <span style="color:var(--muted);font-size:11px">(${new Date(latestLog.date).toLocaleDateString('en-GB',{day:'numeric',month:'short'})})</span></div>` : '<div style="color:var(--muted)">Weight: not yet logged</div>',
+      latestLog ? `<div><span style="color:var(--muted)">Weight:</span> <strong style="color:var(--text)">${latestLog.weight != null ? latestLog.weight.toFixed(1) : '—'} kg</strong> <span style="color:var(--muted);font-size:11px">(${new Date(latestLog.date).toLocaleDateString('en-GB',{day:'numeric',month:'short'})})</span></div>` : '<div style="color:var(--muted)">Weight: not yet logged</div>',
       latestLog && latestLog.waist ? `<div><span style="color:var(--muted)">Waist:</span> <strong style="color:var(--text)">${latestLog.waist} cm</strong></div>` : '',
       latestHealth && latestHealth.bp ? `<div><span style="color:var(--muted)">Blood Pressure:</span> <strong style="color:var(--text)">${latestHealth.bp}</strong></div>` : '',
       latestHealth && latestHealth.bf != null ? `<div><span style="color:var(--muted)">Body Fat:</span> <strong style="color:var(--text)">${latestHealth.bf.toFixed(1)}%</strong></div>` : '',
@@ -3370,11 +3575,118 @@ document.addEventListener('DOMContentLoaded', function() {
   renderNutrition();
   renderWeekView();
 
-  // Set default log date to today
+  // Set default log date to today (custom picker)
   const todayStr = new Date().toISOString().split('T')[0];
-  document.getElementById('log-date').value = todayStr;
-  loadLogDate(todayStr);
+  selectPickerDate(todayStr);
 });
+
+// ── CUSTOM LOG DATE PICKER ────────────────────────────────────────────────────
+let _pickerMonth = null; // { year, month } currently displayed
+
+function openLogPicker() {
+  const sel = document.getElementById('log-date-display').dataset.value;
+  const now = new Date();
+  if (sel) {
+    const d = new Date(sel); d.setHours(12);
+    _pickerMonth = { year: d.getFullYear(), month: d.getMonth() };
+  } else {
+    _pickerMonth = { year: now.getFullYear(), month: now.getMonth() };
+  }
+  renderLogPicker();
+  document.getElementById('log-picker-overlay').style.display = 'flex';
+}
+
+function closeLogPicker() {
+  document.getElementById('log-picker-overlay').style.display = 'none';
+}
+
+function changePickerMonth(delta) {
+  _pickerMonth.month += delta;
+  if (_pickerMonth.month > 11) { _pickerMonth.month = 0; _pickerMonth.year++; }
+  if (_pickerMonth.month < 0)  { _pickerMonth.month = 11; _pickerMonth.year--; }
+  renderLogPicker();
+}
+
+function selectPickerDate(dateStr) {
+  const el = document.getElementById('log-date-display');
+  if (!el) { loadLogDate(dateStr); return; }
+  el.dataset.value = dateStr;
+  const d = new Date(dateStr); d.setHours(12);
+  el.textContent = d.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+  el.style.color = 'var(--text)';
+  closeLogPicker();
+  loadLogDate(dateStr);
+}
+
+function getLogPickerValue() {
+  return document.getElementById('log-date-display').dataset.value || '';
+}
+
+function renderLogPicker() {
+  const { year, month } = _pickerMonth;
+  const log    = getData(STORE_LOG);
+  const health = getData(STORE_HEALTH);
+  const logDates    = new Set(log.map(l => l.date));
+  const healthDates = new Set(health.map(h => h.date));
+  const hasDates    = new Set([...logDates, ...healthDates]);
+
+  const now      = new Date(); now.setHours(0,0,0,0);
+  const selected = document.getElementById('log-date-display').dataset.value || '';
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay  = new Date(year, month + 1, 0);
+  // 0=Sun..6=Sat → Mon-start offset
+  const startDow = (firstDay.getDay() + 6) % 7;
+
+  const monthNames = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December'];
+
+  let cells = '';
+  // Day headers
+  for (const d of ['Mo','Tu','We','Th','Fr','Sa','Su']) {
+    cells += `<div style="text-align:center;font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted);padding:4px 0">${d}</div>`;
+  }
+  // Blank cells
+  for (let i = 0; i < startDow; i++) {
+    cells += '<div></div>';
+  }
+  // Day cells
+  for (let day = 1; day <= lastDay.getDate(); day++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const cellDate = new Date(year, month, day);
+    const isToday    = cellDate.getTime() === now.getTime();
+    const isSelected = dateStr === selected;
+    const hasData    = hasDates.has(dateStr);
+    const isFuture   = cellDate > now;
+
+    let bg = 'transparent';
+    let color = isFuture ? 'var(--muted)' : 'var(--text)';
+    let border = '1px solid transparent';
+    let fontWeight = '400';
+    let indicator = '';
+
+    if (isSelected) {
+      bg = 'var(--accent)'; color = 'white'; border = '1px solid var(--accent)'; fontWeight = '600';
+    } else if (isToday) {
+      border = '1px solid var(--gold)'; color = 'var(--gold)'; fontWeight = '600';
+    }
+    if (hasData && !isSelected) {
+      indicator = `<div style="width:5px;height:5px;border-radius:50%;background:var(--success);margin:1px auto 0;opacity:0.9"></div>`;
+      if (!isFuture) color = 'var(--text)';
+    }
+
+    cells += `<div onclick="${isFuture ? '' : `selectPickerDate('${dateStr}')`}"
+      style="text-align:center;border-radius:8px;padding:5px 2px;cursor:${isFuture ? 'default' : 'pointer'};
+             background:${bg};color:${color};border:${border};font-weight:${fontWeight};
+             font-size:13px;touch-action:manipulation;user-select:none;opacity:${isFuture ? '0.35' : '1'}">
+      ${day}${indicator}
+    </div>`;
+  }
+
+  document.getElementById('log-picker-grid').innerHTML = cells;
+  document.getElementById('log-picker-title').textContent = `${monthNames[month]} ${year}`;
+}
+
 </script>
 
 <!-- SETUP / SETTINGS OVERLAY -->
@@ -3476,5 +3788,18 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('./service-worker.js'); });
 }
 </script>
+
+  <!-- Log date picker overlay -->
+  <div id="log-picker-overlay" onclick="closeLogPicker()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center;padding:20px">
+    <div onclick="event.stopPropagation()" style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;width:min(320px,90vw)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <button onclick="changePickerMonth(-1)" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:6px 12px;cursor:pointer;font-size:16px">‹</button>
+        <div id="log-picker-title" style="font-family:'Courier New',Courier,monospace;font-size:13px;color:var(--text);font-weight:600"></div>
+        <button onclick="changePickerMonth(1)" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:6px 12px;cursor:pointer;font-size:16px">›</button>
+      </div>
+      <div id="log-picker-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px"></div>
+      <div style="margin-top:10px;font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted);text-align:center">● = data logged</div>
+    </div>
+  </div>
 </body>
 </html>
