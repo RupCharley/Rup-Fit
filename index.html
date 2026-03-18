@@ -1608,32 +1608,7 @@ function applySessionOverride(type) {
   else renderMonthView();
 }
 
-function resetSwaps() {
-  const swaps = getSwaps();
-  const todayStr = new Date().toISOString().split('T')[0];
-  let removed = 0;
-  Object.keys(swaps).forEach(function(k) {
-    if (k >= todayStr) { delete swaps[k]; removed++; }
-  });
-  localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
-  renderToday();
-  if (schedView === 'week') renderWeekView();
-  else renderMonthView();
-  closeSettings();
-  alert(removed > 0
-    ? removed + ' override' + (removed !== 1 ? 's' : '') + ' cleared — schedule restored to normal.'
-    : 'No active overrides to clear.');
-}
 
-
-// ── DATA ──────────────────────────────────────────────────────────────
-const WEDDING = new Date('2026-06-14');
-const START = new Date('2026-02-19');
-const TARGET_WEIGHT = 84;
-const START_WEIGHT = 90;
-
-
-// Dynamic sessions based on programme week
 function getCurrentWeek() {
   const start = new Date('2026-02-19');
   const now = new Date();
@@ -2151,6 +2126,8 @@ function getMissedCount() {
 }
 
 // ── COUNTDOWN ────────────────────────────────────────────────────────
+const WEDDING = new Date('2026-06-14');
+const START   = new Date('2026-02-19');
 function updateCountdown() {
   const now = new Date();
   const diff = Math.ceil((WEDDING - now) / (1000*60*60*24));
@@ -2644,6 +2621,9 @@ function loadLogDate(date) {
 
 
 function renderProgress() {
+  const _setup = getSetup();
+  const START_WEIGHT  = _setup.startWeight  || ('rupert' === 'rupert' ? 90 : 55);
+  const TARGET_WEIGHT = _setup.targetWeight || ('rupert' === 'rupert' ? 84 : 53);
   const log = getData(STORE_LOG);
   const latest = log.length ? log[log.length-1] : null;
   const latestW = getData(STORE_LOG).filter(l => l.weight != null).slice(-1)[0] || null;
@@ -3278,7 +3258,8 @@ function dayRowClick(dateStr, type) {
             <button onclick="markMissedForDate('${dateStr}')" style="flex:1;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:10px;padding:11px;font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">✗ Missed</button>
           </div>
         `}
-      </div>` : ''}`;
+      </div>` : ''}
+      <button onclick="openSessionPicker('${dateStr}')" style="width:100%;margin-top:8px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:11px;color:var(--muted);font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">⚙ Change Session Type</button>`;
   } else {
     const r = REST_MESSAGES[dow] || { icon:'😴', title:'Rest Day', msg:'Full recovery day.' };
     // Check if this date itself has a swap (it's the rest day that was swapped)
@@ -3303,7 +3284,7 @@ function dayRowClick(dateStr, type) {
         <div style="font-size:14px;color:var(--muted);line-height:1.7">${r.msg}</div>
         ${swapMsg}
       </div>
-      ${!isPast ? `<button onclick="openSessionPicker('${dateStr}')" style="width:100%;background:var(--accent);color:white;border:none;border-radius:10px;padding:13px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">Change Session</button>` : ''}`;
+      <button onclick="openSessionPicker('${dateStr}')" style="width:100%;background:var(--accent);color:white;border:none;border-radius:10px;padding:13px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">Change Session</button>`;
   }
 
   document.getElementById('modal-date').textContent = fmt;
@@ -3760,8 +3741,6 @@ function renderLogPicker() {
     </div>
 
     <button onclick="saveSettings()" style="width:100%;background:var(--gold);color:#0a0a0f;border:none;border-radius:12px;padding:16px;font-family:'Courier New',Courier,monospace;font-size:14px;font-weight:500;cursor:pointer;letter-spacing:1px">SAVE SETTINGS →</button>
-
-    <button onclick="resetSwaps()" style="width:100%;background:var(--surface2);color:var(--danger);border:1px solid rgba(201,76,76,0.4);border-radius:12px;padding:14px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation;margin-top:8px">↺ Reset All Swaps — Restore Normal Schedule</button>
 
         <button onclick="closeSettings()" style="width:100%;background:none;border:none;color:var(--muted);font-family:'Courier New',Courier,monospace;font-size:11px;padding:14px;cursor:pointer;margin-top:4px">Close</button>
 
