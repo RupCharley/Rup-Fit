@@ -1565,6 +1565,67 @@
 </div>
 
 <script>
+// ── SESSION OVERRIDE ─────────────────────────────────────────────────────────
+// Replaces old swap system. Each date can have a direct session override: A, B, C, or 'rest'.
+// Stored in STORE_SWAPS as { dateStr: 'A'|'B'|'C'|'rest' }
+
+function getSwaps() {
+  try { return JSON.parse(localStorage.getItem(STORE_SWAPS)) || {}; } catch(e) { return {}; }
+}
+
+function openSessionPicker(dateStr) {
+  document.getElementById('session-picker-date').textContent =
+    new Date(dateStr + 'T12:00:00').toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' });
+  document.getElementById('session-picker-date').dataset.date = dateStr;
+  const swaps = getSwaps();
+  const current = swaps[dateStr] || null;
+  ['A','B','C','rest'].forEach(function(opt) {
+    const btn = document.getElementById('spick-' + opt.toLowerCase());
+    if (btn) btn.style.background = current === opt ? 'var(--accent)' : 'var(--surface2)';
+    if (btn) btn.style.color      = current === opt ? 'white'         : 'var(--text)';
+  });
+  document.getElementById('session-picker-overlay').style.display = 'flex';
+}
+
+function closeSessionPicker() {
+  document.getElementById('session-picker-overlay').style.display = 'none';
+}
+
+function applySessionOverride(type) {
+  const dateStr = document.getElementById('session-picker-date').dataset.date;
+  if (!dateStr) return;
+  const swaps = getSwaps();
+  if (type === 'normal') {
+    delete swaps[dateStr];
+  } else {
+    swaps[dateStr] = type;
+  }
+  localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
+  closeSessionPicker();
+  closeModal();
+  renderToday();
+  if (schedView === 'week') renderWeekView();
+  else renderMonthView();
+}
+
+function resetSwaps() {
+  const swaps = getSwaps();
+  const todayStr = new Date().toISOString().split('T')[0];
+  let removed = 0;
+  Object.keys(swaps).forEach(function(k) {
+    if (k >= todayStr) { delete swaps[k]; removed++; }
+  });
+  localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
+  renderToday();
+  if (schedView === 'week') renderWeekView();
+  else renderMonthView();
+  closeSettings();
+  alert(removed > 0
+    ? removed + ' override' + (removed !== 1 ? 's' : '') + ' cleared — schedule restored to normal.'
+    : 'No active overrides to clear.');
+}
+
+
 // ── DATA ──────────────────────────────────────────────────────────────
 const WEDDING = new Date('2026-06-14');
 const START = new Date('2026-02-19');
@@ -1631,19 +1692,13 @@ const SESSION_B = {
 
 const SESSION_C = {
   name: 'Session C — Whole Body',
-  cardio: { name: 'Recumbent Bike or Treadmill', duration: '15 minutes', getDesc: function(w) {
-    if(w<=8)  return 'Recumbent Bike · 15 min easy-moderate pace. This session focuses on weights — keep cardio at 60–70% effort, just enough to warm up fully. Resistance level 4–6.';
-    if(w<=15) return 'Treadmill · 15 min brisk walk at incline 3–4°. Warm the whole body up before the compound lifts. Keep it purposeful but not exhausting.';
-    return 'Recumbent Bike · 12 min easy. Taper week — just enough to warm up. Save energy for the exercises.';
-  }},
   exercises: [
-    { id:'c-squat',      name: 'Goblet Squat',          sets: 3, reps: 12, suggested: 8,  unit:'kg', tip: 'Whole body anchor — legs, core, and upper back all working. Hold dumbbell at chest, sit deep, drive through heels.' },
-    { id:'c-rdl',        name: 'Romanian Deadlift',      sets: 3, reps: 10, suggested: 7,  unit:'kg', tip: 'Hinge at the hips, feel the hamstring stretch, squeeze glutes to stand. Keeps the posterior chain strong.' },
-    { id:'c-press',      name: 'Dumbbell Shoulder Press',sets: 3, reps: 10, suggested: 5,  unit:'kg', tip: 'Seated or standing. Press straight overhead. Whole body stability — core braces throughout.' },
-    { id:'c-row',        name: 'Dumbbell Row',           sets: 3, reps: 10, suggested: 6,  unit:'kg', tip: 'One arm at a time. Back flat, elbow drives up and back. Balances the pressing work.' },
-    { id:'c-lunge',      name: 'Reverse Lunge',          sets: 3, reps: 10, suggested: 5,  unit:'kg', tip: 'Step back, front knee over ankle, back knee low. Dumbbells at sides. Alternate legs. Hits glutes, quads and core together.' },
-    { id:'c-pushup',     name: 'Press-ups',              sets: 3, reps: 10, suggested: null, unit:null, tip: 'Chest to floor, body rigid. The whole body pressing movement — complements the dumbbell row.' },
-    { id:'c-plank',      name: 'Plank',                  sets: 3, reps: '45 sec', suggested: null, unit:null, tip: 'Forearms or hands. Brace everything. Finish strong.' },
+    { id:'c-sumo',    name: 'Dumbbell Sumo Squat',            sets: 3, reps: 12, suggested: 10, unit:'kg',  tip: 'Wide stance, toes out 45°. Hold one dumbbell vertically at chest. Sit deep, knees tracking over toes. Hits inner thighs and glutes differently to a standard squat.' },
+    { id:'c-renegade',name: 'Renegade Row',                   sets: 3, reps: 8,  suggested: 6,  unit:'kg',  tip: 'Start in press-up position, a dumbbell in each hand. Row one dumbbell to hip while the other arm and both legs brace hard. Swap sides. Core and back working together.' },
+    { id:'c-rdlrow',  name: 'Deadlift to Upright Row',        sets: 3, reps: 10, suggested: 7,  unit:'kg',  tip: 'Hinge to Romanian deadlift, then as you stand pull the dumbbells up to chin height — elbows flaring wide. Posterior chain and shoulders in one movement.' },
+    { id:'c-laterallunge', name: 'Lateral Lunge',             sets: 3, reps: 10, suggested: 6,  unit:'kg',  tip: 'Step wide to one side, sit into that hip, keep the other leg straight. Dumbbell in each hand. Alternate sides. Hits adductors and glutes from a completely different angle.' },
+    { id:'c-fly',     name: 'Dumbbell Chest Fly',             sets: 3, reps: 12, suggested: 5,  unit:'kg',  tip: 'Lie on bench or floor. Arms wide with a slight bend in the elbows, lower until you feel the chest stretch, squeeze back up. Keep the movement slow and controlled.' },
+    { id:'c-superman',name: 'Superman Hold',                  sets: 3, reps: 10, suggested: null, unit:null, tip: 'Lie face down, arms stretched ahead. Lift opposite arm and leg together, hold 2 seconds, lower. Alternate sides. Lower back, glutes and posterior chain finisher.' },
   ]
 };
 
@@ -1743,10 +1798,10 @@ function renderAwaySession() {
   return `
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:16px;margin-top:12px">
       <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Away Session — No Equipment Needed</div>
-      <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--surface)">
+      ${s.cardio ? `<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--surface)">
         <div style="font-size:13px;color:var(--gold);margin-bottom:4px">🚶 ${s.cardio.name} — ${s.cardio.duration}</div>
         <div style="font-size:12px;color:var(--muted);line-height:1.5">${s.cardio.getDesc ? s.cardio.getDesc(getCurrentWeek()) : s.cardio.desc}</div>
-      </div>
+      </div>` : ''}
       ${exHTML}
       <div style="font-family:'Courier New',Courier,monospace;font-size:11px;color:var(--muted);margin-top:8px;text-align:center">All bodyweight — hotel room, garden, anywhere</div>
       <button onclick="markAwayDone()" style="width:100%;margin-top:14px;background:var(--accent);color:white;border:none;border-radius:10px;padding:12px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">✓ Done — No Gym session complete</button>
@@ -1790,28 +1845,33 @@ function exportToCSV() {
   URL.revokeObjectURL(url);
 }
 
+
+function parseCSVLine(line) {
+  var result = [], cur = '', inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ;
+    } else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+    else { cur += ch; }
+  }
+  result.push(cur.trim()); return result;
+}
+
 function importFromCSV() {
   var input = document.createElement('input');
   input.type = 'file';
   input.accept = '.csv,text/csv';
+  input.style.display = 'none';
+  document.body.appendChild(input);
   input.onchange = function(e) {
     var file = e.target.files[0];
+    document.body.removeChild(input);
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function(ev) {
       try {
         var text = ev.target.result;
-        function parseCSVLine(line) {
-          var result = [], cur = '', inQ = false;
-          for (var i = 0; i < line.length; i++) {
-            var ch = line[i];
-            if (ch === '"') {
-              if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ;
-            } else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
-            else { cur += ch; }
-          }
-          result.push(cur.trim()); return result;
-        }
         var lines = text.split(/\r?\n/);
         var section = null;
         var measData = [], healthData = [], foodData = [];
@@ -1833,9 +1893,9 @@ function importFromCSV() {
           }
           if (section === 'nut') {
             if (cols[0] === 'Date') continue;
-            var ndate = cols[0], name = cols[1];
-            if (!ndate || !name) continue;
-            foodData.push({ id: Date.now() + Math.random(), date: ndate, name: name,
+            var ndate = cols[0], fname = cols[1];
+            if (!ndate || !fname) continue;
+            foodData.push({ id: Date.now() + Math.random(), date: ndate, name: fname,
               kcal: parseFloat(cols[2])||0, prot: parseFloat(cols[3])||0,
               carb: parseFloat(cols[4])||0, fat:  parseFloat(cols[5])||0 });
           }
@@ -1843,8 +1903,12 @@ function importFromCSV() {
         var log = getData(STORE_LOG);
         measData.forEach(function(r) {
           var i = log.findIndex(function(l) { return l.date === r.date; });
-          if (i >= 0) { if (r.weight != null) log[i].weight = r.weight; if (r.waist != null) log[i].waist = r.waist; }
-          else if (r.weight != null) log.push(r);
+          if (i >= 0) {
+            if (r.weight != null) log[i].weight = r.weight;
+            if (r.waist  != null) log[i].waist  = r.waist;
+          } else {
+            log.push({ date: r.date, weight: r.weight, waist: r.waist });
+          }
         });
         log.sort(function(a,b) { return a.date.localeCompare(b.date); });
         setData(STORE_LOG, log);
@@ -1867,7 +1931,7 @@ function importFromCSV() {
         renderProgress(); renderHealthMetrics(); renderNutrition();
       } catch(err) { alert('Import failed: ' + err.message); }
     };
-    reader.readAsText(file);
+    reader.readAsText(file, 'utf-8');
   };
   input.click();
 }
@@ -1984,62 +2048,6 @@ function renderHealthMetrics() {
 
 
 const STORE_SWAPS = 'rupert_swaps';
-
-function getSwaps() {
-  try { return JSON.parse(localStorage.getItem(STORE_SWAPS)) || {}; } catch(e) { return {}; }
-}
-
-function swapRestDay() {
-  const today = new Date().toISOString().split('T')[0];
-  const swaps = getSwaps();
-  if (swaps[today]) {
-    delete swaps[today];
-    localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
-    renderToday();
-    renderWeekView();
-    return;
-  }
-  // Find next session day
-  const sessions = getSessions();
-  const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    const day = dow[d.getDay()];
-    if (sessions[day]) {
-      swaps[today] = { session: sessions[day], date: d.toISOString().split('T')[0] };
-      localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
-      renderToday();
-      renderWeekView();
-      return;
-    }
-  }
-}
-
-function swapRestDayForDate(dateStr) {
-  const swaps = getSwaps();
-  if (swaps[dateStr]) {
-    delete swaps[dateStr];
-    localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
-  } else {
-    const d = new Date(dateStr); d.setHours(12);
-    const sessions = getSessions(d);
-    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    // Find next session day from dateStr
-    for (let i = 1; i <= 7; i++) {
-      const next = new Date(d); next.setDate(d.getDate() + i);
-      const day = dow[next.getDay()];
-      if (sessions[day]) {
-        swaps[dateStr] = { session: sessions[day], date: next.toISOString().split('T')[0] };
-        localStorage.setItem(STORE_SWAPS, JSON.stringify(swaps));
-        break;
-      }
-    }
-  }
-  renderWeekView();
-  renderToday();
-  closeModal();
-}
 
 function getTodaySession() {
   const today = new Date().toISOString().split('T')[0];
@@ -2164,14 +2172,14 @@ function renderToday() {
   // Check swaps
   const todayStr = new Date().toISOString().split('T')[0];
   const swaps = getSwaps();
-  // If today's session was moved away to a rest day, treat today as rest
-  const isSourceOfSwap = Object.values(swaps).some(s => s && s.date === todayStr);
-  const swappedInSession = swaps[todayStr] ? swaps[todayStr].session : null;
+  const override = swaps[todayStr] || null;
+  const swappedInSession = (override && override !== 'rest') ? override : null;
+  const isSourceOfSwap = false;
   const day = swappedInSession || sessionKey || dayName;
   const container = document.getElementById('session-container');
   const ds = getDateStr();
 
-  if ((!sessionKey && !swappedInSession) || isSourceOfSwap) {
+  if ((!sessionKey && !swappedInSession) || override === 'rest') {
     const r = REST_MESSAGES[day] || { icon:'😴', title:'Rest Day', msg:'Enjoy your rest.' };
     container.innerHTML = `
       <div class="card">
@@ -2190,8 +2198,8 @@ function renderToday() {
         </div>
       </div>` : ''}
       <div style="background:rgba(76,127,201,0.06);border:1px solid rgba(76,127,201,0.2);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div style="font-size:13px;color:var(--muted)">Rest day — want to train today instead?</div>
-        <button onclick="swapRestDay()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:8px 12px;font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">Swap</button>
+        <div style="font-size:13px;color:var(--muted)">Not the right session today?</div>
+        <button onclick="openSessionPicker('${todayStr}')" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:8px 14px;font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">Change</button>
       </div>
       <div class="tip-box">
         <p><strong>Remember:</strong> Creatine 3g today regardless. Hydrate well. Sauna session recommended for recovery.</p>
@@ -2250,8 +2258,8 @@ function renderToday() {
   const todaySession = getTodaySession();
   const swapBtn = !todaySession ? `
     <div style="background:rgba(76,127,201,0.06);border:1px solid rgba(76,127,201,0.2);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
-      <div style="font-size:13px;color:var(--muted)">Rest day — want to train today instead?</div>
-      <button onclick="swapRestDay()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:8px 12px;font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">Swap</button>
+      <div style="font-size:13px;color:var(--muted)">Not the right session today?</div>
+      <button onclick="openSessionPicker('${todayStr}')" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:8px 14px;font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation">Change</button>
     </div>` : '';
 
   const isWednesday = dayName === 'Wed';
@@ -2336,16 +2344,17 @@ function renderToday() {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div class="session-badge">${effectiveKey === 'A' ? 'SESSION A' : effectiveKey === 'C' ? 'SESSION C' : 'SESSION B'}${isWednesday ? ' + JIVE 💃' : ''}</div>
         <button id="away-btn" onclick="toggleAwaySession()" style="background:transparent;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'Courier New',Courier,monospace;font-size:10px;padding:5px 10px;cursor:pointer;touch-action:manipulation;letter-spacing:0.5px">No Gym</button>
+        <button onclick="openSessionPicker('${todayStr}')" style="background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:'Courier New',Courier,monospace;font-size:10px;padding:5px 10px;cursor:pointer;touch-action:manipulation">Change</button>
       </div>
       <div class="card-title">${s.name}</div>
       ${progBanner}
       ${wednesdayBanner}
       ${doneBar}
       <div id="away-session-panel" style="display:none"></div>
-      <div class="cardio-block">
+      ${s.cardio ? `<div class="cardio-block">
         <div class="cardio-title">🚣 ${s.cardio.name} — ${s.cardio.duration}</div>
         <div class="cardio-desc">${s.cardio.getDesc ? s.cardio.getDesc(getCurrentWeek()) : s.cardio.desc}</div>
-      </div>
+      </div>` : ''}
       ${exHTML}
       <div class="session-complete" id="session-done">
         <p>Session Complete 🎯</p>
@@ -3041,14 +3050,12 @@ function getDayInfo(date) {
   const dateStr = date.toISOString().split('T')[0];
   // Check if this rest day has been swapped to a session
   const swaps = getSwaps();
-  // If this date is the source session that was moved to a rest day, show as rest
-  const isSourceOfSwap = Object.values(swaps).some(s => s && s.date === dateStr);
-  if (isSourceOfSwap) {
-    return { type:'rest', name:'Rest Day', detail:'Session moved — training another day', badge:'badge-rest', label:'REST' };
-  }
-  const swappedSession = swaps[dateStr] ? swaps[dateStr].session : null;
+  const override = swaps[dateStr] || null;
   const SESSIONS_NOW = getSessions(date);
-  const session = swappedSession || SESSIONS_NOW[dow];
+  if (override === 'rest') {
+    return { type:'rest', name:'Rest Day', detail:'Rest day (overridden)', badge:'badge-rest', label:'REST' };
+  }
+  const session = override || SESSIONS_NOW[dow];
   if (session === 'A') return { type:'A', name:'Session A', detail:'Rowing · Upper Body · Core', badge:'badge-a', label:'SES A' };
   if (session === 'C') return { type:'C', name:'Session C', detail:'Whole Body · Compound Lifts', badge:'badge-c', label:'SES C' };
   if (session === 'B') {
@@ -3157,7 +3164,7 @@ function renderMissedSummary() {
     const d = new Date(ds); d.setHours(12);
     const dow = DOW_NAMES[d.getDay()];
     const swapsM = getSwaps();
-    const sType = (swapsM[ds] ? swapsM[ds].session : null) || getSessions()[dow] || '?';
+    const sType = (swapsM[ds] && swapsM[ds] !== 'rest' ? swapsM[ds] : null) || getSessions()[dow] || '?';
     return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
       <span>${ds} <span style="font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted)">${dow}</span></span>
       <span style="font-family:'Courier New',Courier,monospace;font-size:10px;padding:2px 8px;background:rgba(201,76,76,0.15);color:var(--danger);border-radius:8px">Session ${sType} missed</span>
@@ -3236,10 +3243,10 @@ function dayRowClick(dateStr, type) {
       <div style="display:inline-block;background:${type==='A'?'rgba(201,168,76,0.15)':type==='C'?'rgba(76,175,122,0.15)':'rgba(76,127,201,0.15)'};border:1px solid ${type==='A'?'rgba(201,168,76,0.4)':type==='C'?'rgba(76,175,122,0.4)':'rgba(76,127,201,0.4)'};border-radius:20px;padding:3px 12px;font-family:'Courier New',Courier,monospace;font-size:11px;color:${type==='A'?'var(--gold)':type==='C'?'var(--success)':'var(--accent)'};margin-bottom:14px;letter-spacing:1px">SESSION ${type}</div>
       <div style="font-family:Georgia,'Times New Roman',serif;font-size:18px;margin-bottom:16px">${s.name}</div>
       ${jiveBanner}
-      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
+      ${s.cardio ? `<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
         <div style="font-size:13px;margin-bottom:4px">🚣 ${s.cardio.name} — ${s.cardio.duration}</div>
         <div style="font-size:12px;color:var(--muted);line-height:1.6">${s.cardio.getDesc ? s.cardio.getDesc(getCurrentWeek()) : s.cardio.desc}</div>
-      </div>
+      </div>` : ''}
       <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Exercises</div>
       ${exHTML}
       ${(isPast || isToday) ? `
@@ -3276,21 +3283,9 @@ function dayRowClick(dateStr, type) {
     const r = REST_MESSAGES[dow] || { icon:'😴', title:'Rest Day', msg:'Full recovery day.' };
     // Check if this date itself has a swap (it's the rest day that was swapped)
     const swaps = getSwaps();
-    const isSwapped = !!swaps[dateStr];
-    // Check if this date is the SOURCE of a swap (a session day that was moved away)
-    const sourceOfSwap = Object.entries(swaps).find(([k, v]) => v && v.date === dateStr);
-    const originalRestDate = sourceOfSwap ? sourceOfSwap[0] : null;
-    const swapTarget = originalRestDate
-      ? `swapRestDayForDate('${originalRestDate}')`
-      : `swapRestDayForDate('${dateStr}')`;
-    const isAnySwap = isSwapped || !!originalRestDate;
-    const btnLabel = originalRestDate
-      ? '↩ Undo swap — restore this session'
-      : isSwapped
-      ? '↩ Undo swap — restore rest day'
-      : '🔄 Swap — train on this rest day instead';
-    const swapMsg = originalRestDate
-      ? '<div style="font-family:\'Courier New\',Courier,monospace;font-size:11px;color:var(--muted);margin-top:8px;text-align:center">Session moved to another day</div>'
+    const isOverridden = !!swaps[dateStr];
+    const swapMsg = isOverridden
+      ? '<div style="font-family:\'Courier New\',Courier,monospace;font-size:11px;color:var(--muted);margin-top:8px;text-align:center">Session overridden for this day</div>'
       : '';
     const jiveBannerModal = isWed ? `
       <div style="background:rgba(76,127,201,0.08);border:1px solid rgba(76,127,201,0.3);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
@@ -3308,9 +3303,7 @@ function dayRowClick(dateStr, type) {
         <div style="font-size:14px;color:var(--muted);line-height:1.7">${r.msg}</div>
         ${swapMsg}
       </div>
-      ${(!isPast && !isToday) || isAnySwap ? `<button onclick="${swapTarget}" style="width:100%;background:${isAnySwap ? 'var(--surface2)' : 'var(--accent)'};color:${isAnySwap ? 'var(--muted)' : 'white'};border:1px solid ${isAnySwap ? 'var(--border)' : 'var(--accent)'};border-radius:10px;padding:13px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation;margin-top:4px">
-        ${btnLabel}
-      </button>` : ''}`;
+      ${!isPast ? `<button onclick="openSessionPicker('${dateStr}')" style="width:100%;background:var(--accent);color:white;border:none;border-radius:10px;padding:13px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">Change Session</button>` : ''}`;
   }
 
   document.getElementById('modal-date').textContent = fmt;
@@ -3441,6 +3434,7 @@ function openSettings() {
   updateTargetSummary();
   document.getElementById('setup-overlay').style.display = 'flex';
 }
+
 
 function closeSettings() {
   document.getElementById('setup-overlay').style.display = 'none';
@@ -3767,7 +3761,9 @@ function renderLogPicker() {
 
     <button onclick="saveSettings()" style="width:100%;background:var(--gold);color:#0a0a0f;border:none;border-radius:12px;padding:16px;font-family:'Courier New',Courier,monospace;font-size:14px;font-weight:500;cursor:pointer;letter-spacing:1px">SAVE SETTINGS →</button>
 
-    <button onclick="closeSettings()" style="width:100%;background:none;border:none;color:var(--muted);font-family:'Courier New',Courier,monospace;font-size:11px;padding:14px;cursor:pointer;margin-top:4px">Close</button>
+    <button onclick="resetSwaps()" style="width:100%;background:var(--surface2);color:var(--danger);border:1px solid rgba(201,76,76,0.4);border-radius:12px;padding:14px;font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation;margin-top:8px">↺ Reset All Swaps — Restore Normal Schedule</button>
+
+        <button onclick="closeSettings()" style="width:100%;background:none;border:none;color:var(--muted);font-family:'Courier New',Courier,monospace;font-size:11px;padding:14px;cursor:pointer;margin-top:4px">Close</button>
 
   </div>
 </div>
@@ -3801,5 +3797,29 @@ if ('serviceWorker' in navigator) {
       <div style="margin-top:10px;font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted);text-align:center">● = data logged</div>
     </div>
   </div>
+
+  <!-- Session picker overlay -->
+  <div id="session-picker-overlay" onclick="closeSessionPicker()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;align-items:center;justify-content:center;padding:20px">
+    <div onclick="event.stopPropagation()" style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;width:min(320px,90vw)">
+      <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Change session for</div>
+      <div id="session-picker-date" style="font-size:15px;color:var(--gold);font-weight:600;margin-bottom:16px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <button id="spick-a" onclick="applySessionOverride('A')" style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;color:var(--text);font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">
+          <div style="font-size:18px;margin-bottom:4px">💪</div>Session A
+        </button>
+        <button id="spick-b" onclick="applySessionOverride('B')" style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;color:var(--text);font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">
+          <div style="font-size:18px;margin-bottom:4px">🚴</div>Session B
+        </button>
+        <button id="spick-c" onclick="applySessionOverride('C')" style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;color:var(--text);font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">
+          <div style="font-size:18px;margin-bottom:4px">🏋️</div>Session C
+        </button>
+        <button id="spick-rest" onclick="applySessionOverride('rest')" style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;color:var(--text);font-family:'Courier New',Courier,monospace;font-size:12px;cursor:pointer;touch-action:manipulation">
+          <div style="font-size:18px;margin-bottom:4px">😴</div>Rest Day
+        </button>
+      </div>
+      <button onclick="applySessionOverride('normal')" style="width:100%;background:transparent;border:1px solid var(--border);border-radius:10px;padding:11px;color:var(--muted);font-family:'Courier New',Courier,monospace;font-size:11px;cursor:pointer;touch-action:manipulation;margin-top:4px">↩ Restore normal schedule for this day</button>
+    </div>
+  </div>
+
 </body>
 </html>
